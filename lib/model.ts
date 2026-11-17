@@ -1,5 +1,5 @@
-// The token radar's model, version 3: comps-calibrated valuation with a breadth
-// and crash-guard signal.
+// The token radar's model, version 4: comps-calibrated valuation with a breadth
+// and crash-guard signal, and netted farm plans.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and adds
 // every other rankable pre-token protocol below the floor: the early rows the radar exists to
@@ -29,6 +29,14 @@
 // cannot set a whole sector's multiple, and the clamp keeps every multiple inside the range the
 // live market actually shows. No protocol name is ever special-cased: the same function scores
 // every row, and the dashboard shows each row's multiple, its comparables and the arithmetic.
+//
+// Farm plans are netted, not templated: each row's plan is derived from its own record
+// (category, chains, TVL, age, implied value, multiple) and ends in a net step that states
+// the whole plan's gas cost against the row's implied value and gives a verdict — Farm,
+// Farm with the standard size, or Thin. The weekly action is the category family's own
+// recurring action, the hold names the protocol's age, and the setup names its chain and
+// capital. The same derivation runs in main.ts (board.json) and in the page (data.js),
+// so the screenshots and the code agree.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -92,7 +100,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-3-breadth';
+export const MODEL_VERSION = 'radar-4-netted';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 1000;
@@ -453,7 +461,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       crash_guard: s.crashGuard,
       age_days: s.age,
     },
-    farm_steps: farmSteps(s.p, s.age).map(stepText),
+    farm_steps: farmSteps(s.p, s.age, s.implied, s.multiple).map(stepText),
   }));
 }
 
@@ -579,30 +587,124 @@ function step(text: string, cost: string, time: string): FarmStep {
 }
 
 /**
- * A protocol's farm plan: six steps, each an action with a cost and a time. The plan is derived from
- * the protocol's own record (category, chains, TVL, age), never from a hand-written list of names.
+ * One category family's weekly action: the recurring thing that keeps the address active.
+ * The first family whose keywords match the protocol's category wins; the fallback covers
+ * every category the table does not name. Each action names the protocol, so the weekly
+ * step is the protocol's own, not a generic "do something weekly".
  */
-export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
+interface WeeklyFamily {
+  keywords: string[];
+  action: (name: string) => string;
+}
+
+const WEEKLY_FAMILIES: WeeklyFamily[] = [
+  {
+    keywords: ['lend', 'cdp', 'collateral'],
+    action: (name) => `Each week, top up or adjust the collateral on ${name} so the position stays active — a fresh deposit, a borrow, or a vote.`,
+  },
+  {
+    keywords: ['dex', 'yield', 'leveraged farm'],
+    action: (name) => `Each week, add or remove a little liquidity, or make one swap on ${name}, so the position shows activity.`,
+  },
+  {
+    keywords: ['bridge'],
+    action: (name) => `Each week, bridge a small amount through ${name} so the address keeps a bridging history.`,
+  },
+  {
+    keywords: ['staking', 'restak'],
+    action: (name) => `Each week, check the staking receipt on ${name} and restake any rewards.`,
+  },
+  {
+    keywords: ['perpetual', 'derivative'],
+    action: (name) => `Each week, adjust the hedge or open one small trade on ${name} so the account stays active.`,
+  },
+  {
+    keywords: ['prediction'],
+    action: (name) => `Each week, place one small market position on ${name}.`,
+  },
+  {
+    keywords: ['curator', 'allocator'],
+    action: (name) => `Each week, check ${name}'s vault points page and add a little if the vault is still open.`,
+  },
+  {
+    keywords: ['stable'],
+    action: (name) => `Each week, check the stable asset on ${name} and its points page.`,
+  },
+  {
+    keywords: ['rwa'],
+    action: (name) => `Each week, check the yield asset's accrual on ${name} and its points page.`,
+  },
+  {
+    keywords: ['insurance'],
+    action: (name) => `Each week, check the cover's status on ${name} and its points page.`,
+  },
+];
+
+/** The category's weekly action, in the words a farmer can follow. */
+function weeklyFor(p: SnapshotProtocol): string {
+  const c = (p.category ?? '').toLowerCase();
+  for (const family of WEEKLY_FAMILIES) {
+    if (family.keywords.some((k) => c.includes(k))) return family.action(p.name);
+  }
+  return `Each week, make one qualifying action on ${p.name} — a deposit, a swap, or a vote — so the address stays active.`;
+}
+
+/** The whole plan's gas: the first transaction, the setup, and one weekly action a week. */
+function totalGasFor(capital: number, hold: number): number {
+  const setupGas = capital >= 150 ? 8 : 4;
+  return 3 + setupGas + 2 * Math.ceil(hold / 7);
+}
+
+/** A short value: $1.49B, $4.1M, $820K, $450. */
+function fmtCompact(n: number): string {
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
+  return `$${n}`;
+}
+
+/** The net verdict: whether this row's implied value justifies the plan's cost. */
+export function verdictFor(implied: number, multiple: number): { label: string; reason: string } {
+  if (implied >= 10_000_000 && multiple >= 0.25) {
+    return { label: 'Farm', reason: 'the sector prices strongly and the value justifies the gas' };
+  }
+  if (implied < 1_000_000) {
+    return { label: 'Thin — smallest size only, or skip', reason: 'the value is under $1M, so the gas is a large share of any airdrop' };
+  }
+  return { label: 'Farm with the standard size', reason: 'the value justifies the position' };
+}
+
+/**
+ * A protocol's farm plan: seven steps, each an action with a cost and a time. The plan is
+ * derived from the protocol's own record (category, chains, TVL, age, implied value,
+ * multiple), never from a hand-written list of names. The last step before the claim nets
+ * the plan: the whole gas cost against the row's implied value, with a verdict.
+ */
+export function farmSteps(p: SnapshotProtocol, age: number | null, implied: number, multiple: number): FarmStep[] {
   const chain = chainOf(p);
   const capital = capitalFor(p);
   const hold = holdDaysFor(age);
   const action = actionFor(p, capital, chain);
+  const weekly = weeklyFor(p);
   const gas = capital >= 150 ? 8 : 4;
+  const totalGas = totalGasFor(capital, hold);
+  const verdict = verdictFor(implied, multiple);
+  const holdText =
+    age === null
+      ? `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`
+      : `Hold the position for at least ${hold} days — ${p.name} was listed ${age} days ago with no token, so a ${hold}-day window covers more than one snapshot.`;
   return [
     step(
-      `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
-      'under $3 of gas for the first transaction',
-      '5 minutes',
+      `Open a fresh wallet on ${chain} and fund it with $${capital} plus about $${gas} for gas. Keep the seed phrase offline.`,
+      `$${capital} of capital and about $${gas} of gas`,
+      '10 minutes',
     ),
     step(action, `$${capital} of capital and about $${gas} of gas`, '15 minutes to set up'),
+    step(weekly, 'about $2 of gas a week', '10 minutes a week'),
+    step(holdText, `the $${capital} stays in the position`, `${hold} days`),
     step(
-      `Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.`,
-      'about $2 of gas a week',
-      '10 minutes a week',
-    ),
-    step(
-      `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
-      `the $${capital} stays in the position`,
+      `Net: about $${totalGas} of gas over ${hold} days plus $${capital} of capital, against an implied value of ${fmtCompact(implied)} at ${multiple.toFixed(2)}x. Verdict: ${verdict.label} — ${verdict.reason}.`,
+      `about $${totalGas} of gas in total`,
       `${hold} days`,
     ),
     step(
