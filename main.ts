@@ -1,9 +1,9 @@
-// Token Radar: an expected-value token-launch radar, round 4 rebuilt as model v6 (Node 22, standard library only).
+// Token Radar: an expected-value token-launch radar, round 4 rebuilt as model v7 (Node 22, standard library only).
 //
 // The run: read the sealed snapshot from /input/snapshot.json (or --input <file|dir>), score
 // every pre-token protocol that passes the house launch rule with the model in lib/model.ts
-// (launch value off a fitted power law, times token odds off a fitted no-token clock),
-// validate that model on the snapshot's own tokened protocols (held-out + walk-forward
+// (launch value off a fitted power law, times token odds off a fitted two-phase no-token
+// clock), validate that model on the snapshot's own tokened protocols (held-out + walk-forward
 // term tests, odds Brier scores, and a checked P25-P75 range), write the ranked board to
 // /output/board.json, copy this repository's dashboard/ and screenshots/ to /output, and
 // last write /output/dossier.json, the summary the judge reads, with the vendored make.fun library.

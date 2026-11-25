@@ -31,6 +31,13 @@
     if (days < 365) return Math.round(days / 30) + 'mo old';
     return (days / 365).toFixed(1) + 'y old';
   }
+  // The ever-launch odds for a survivor of `days` days, under the fitted two-phase clock:
+  // the launchers who survived this long, over all survivors. Same rule as lib/model.ts.
+  function oddsEver(days) {
+    var c = DATA.odds_clock;
+    var s = Math.exp(-c.hazard_early_per_day * Math.min(days, c.changepoint_days) - c.hazard_late_per_day * Math.max(0, days - c.changepoint_days));
+    return ((1 - c.pi) * s) / (c.pi + (1 - c.pi) * s);
+  }
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
@@ -290,7 +297,7 @@
     shell.appendChild(scen);
     var wrap = el('div', { class: 'card' });
     shell.appendChild(wrap);
-    shell.appendChild(el('p', { class: 'note', html: '<b>Implied value</b> is the entry’s own claim, never make.fun’s: launch value × token odds. Launch value = 10^(intercept + slope × log10 TVL + category offset). Token odds = the no-token clock: a share of protocols never launch, the rest launch with a constant daily hazard — so the odds fall the longer a protocol has run with no token. The small range under the value is the P25–P75 range from the held-out test, stated 50% and checked in the Validation tab. <b>Watchlist</b> rows (TVL at or above the $50M floor) carry the teal edge.' }));
+    shell.appendChild(el('p', { class: 'note', html: '<b>Implied value</b> is the entry’s own claim, never make.fun’s: launch value × token odds. Launch value = 10^(intercept + slope × log10 TVL + category offset). Token odds = the no-token clock: a share π = ' + DATA.odds_clock.pi + ' never launch, the rest launch fast in the first ' + DATA.odds_clock.changepoint_days + ' days (hazard ' + DATA.odds_clock.hazard_early_per_day + '/day) and then slower (' + DATA.odds_clock.hazard_late_per_day + '/day) — so the odds fall the longer a protocol has run with no token, fastest early on. The small range under the value is the P25–P75 range from the held-out test, stated 50% and checked in the Validation tab. <b>Watchlist</b> rows (TVL at or above the $50M floor) carry the teal edge.' }));
 
     function renderTable() {
       var rows = filteredRows();
@@ -425,7 +432,7 @@
     shell.appendChild(terms);
     var odds = el('section', { class: 'panel' });
     odds.appendChild(el('h2', { text: 'Token odds — the no-token clock, tested as a classifier' }));
-    odds.appendChild(el('p', { text: 'The clock: a share π = ' + v.odds.pi + ' of protocols never launch, the rest launch with a daily hazard of ' + v.odds.hazard_per_day + '. Fitted on the 645 dated protocols (327 record a token). It is tested as a classifier of which peers record a token: the Brier score (lower is better) against the base rate, walk-forward on listing date and five-fold by slug order. The board’s odds are the ever-launch odds for a survivor of that age — 0.84 at 90 days, 0.54 at 3 years, 0.23 at 2,000 days — not a forecast that a token will launch.' }));
+    odds.appendChild(el('p', { text: 'The clock: a share π = ' + v.odds.pi + ' of protocols never launch; the rest launch with a daily hazard of ' + v.odds.hazard_early_per_day + ' for the first ' + v.odds.changepoint_days + ' days, then ' + v.odds.hazard_late_per_day + ' after that — tokens arrive fast early, then the hazard drops ' + (v.odds.hazard_early_per_day / v.odds.hazard_late_per_day).toFixed(1) + '×. Fitted by grid search on the 645 dated protocols (327 record a token). It is tested as a classifier of which peers record a token: the Brier score (lower is better) against the base rate, walk-forward on listing date and five-fold by slug order — and against the constant-hazard clock it replaces (walk-forward ' + v.odds.constant_clock.walk_forward_brier.toFixed(3) + ', five-fold ' + v.odds.constant_clock.five_fold_brier.toFixed(3) + '). The board’s odds are the ever-launch odds for a survivor of that age — ' + oddsEver(90).toFixed(2) + ' at 90 days, ' + oddsEver(1095).toFixed(2) + ' at 3 years, ' + oddsEver(2000).toFixed(2) + ' at 2,000 days — not a forecast that a token will launch.' }));
     var owrap = el('div', { class: 'card' });
     var otable = el('table', { class: 'plain' });
     var othead = el('thead');
@@ -459,7 +466,7 @@
     ctable.appendChild(ctbody);
     cwrap.appendChild(ctable);
     odds.appendChild(cwrap);
-    odds.appendChild(el('p', { text: 'One honest miss: the clock under-predicts the youngest bucket (10% predicted vs 26% actual under six months) — tokens arrive faster in the first six months than a constant hazard allows. The board’s odds are the ever-launch odds, which is what the farm decision needs, and the calibration above is shown so the miss is visible.' }));
+    odds.appendChild(el('p', { text: 'The youngest bucket is still the clock’s weakest: ' + (v.odds.calibration[0].predicted_share * 100).toFixed(0) + '% predicted vs ' + (v.odds.calibration[0].actual_share * 100).toFixed(0) + '% actual under six months — tokens still arrive faster in the first months than even the two-phase hazard allows. The board’s odds are the ever-launch odds, which is what the farm decision needs, and the calibration above is shown so the miss is visible.' }));
     shell.appendChild(odds);
     var comp = el('section', { class: 'panel' });
     comp.appendChild(el('h2', { text: 'Model comparison — held-out' }));
@@ -484,7 +491,7 @@
     shell.appendChild(comp);
     var cal = el('section', { class: 'panel' });
     cal.appendChild(el('h2', { text: 'Calibration — held-out predictions by quintile' }));
-    cal.appendChild(el('p', { text: 'The 59 held-out predictions cut into five groups by predicted value. A calibrated model has a ratio near 1.0 in every group; the top group runs 3.13× hot — the biggest protocols’ tokens are the hardest to price, and the board’s P25–P75 range is widest where the model is weakest.' }));
+    cal.appendChild(el('p', { text: 'The 59 held-out predictions cut into five groups by predicted value. A calibrated model has a ratio near 1.0 in every group; the top group runs ' + v.calibration[4].ratio.toFixed(2) + '× hot — the biggest protocols’ tokens are the hardest to price, and the board’s P25–P75 range is widest where the model is weakest.' }));
     var wrap2 = el('div', { class: 'card' });
     var table2 = el('table', { class: 'plain' });
     var thead2 = el('thead');
@@ -508,7 +515,7 @@
     ci.appendChild(el('p', { html: '<b>How wide is the range?</b> The printed P25–P75 range is <b>×' + v.range_honesty.p25_factor + ' to ×' + v.range_honesty.p75_factor + '</b> around the point estimate — stated 50%, and ' + v.range_honesty.loo_inside_p25_75_pct.toFixed(0) + '% of held-out caps (leave-one-out) and ' + v.range_honesty.walk_inside_p25_75_pct.toFixed(0) + '% (walk-forward) actually fall inside it. Within ×3 of the model sit ' + v.range_honesty.loo_inside_3x_pct.toFixed(0) + '% leave-one-out and ' + v.range_honesty.walk_inside_3x_pct.toFixed(0) + '% walk-forward. The wider 90% range is ×' + v.ci_low_factor + ' to ×' + v.ci_high_factor + ', and the typical miss is ×' + v.typical_factor.toFixed(1) + '. Token pricing is noisy — a protocol’s market cap can sit an order of magnitude from what its TVL suggests — so every board row carries its range in the detail view. A radar that pretended its values were precise would be lying; this one shows its error bars.' }));
     shell.appendChild(ci);
     var method = el('div', { class: 'callout' });
-    method.appendChild(el('p', { html: '<b>Method, in full.</b> Comparables: the 119 tokened, non-exchange protocols with a market cap and a CoinGecko id. Launch value: least squares of log10(market cap) on log10(TVL) — intercept <b>' + DATA.power_law.intercept + '</b>, slope <b>' + DATA.power_law.slope + '</b> — plus each category’s median residual, shrunk toward zero with k = 20 and clamped to ±0.3 dex; fitted on the whole set for the board, and refitted on each training half for the tests. Token odds: the no-token clock, π = <b>' + DATA.odds_clock.pi + '</b> never launch, daily hazard <b>' + DATA.odds_clock.hazard_per_day + '</b> for the rest, fitted by grid search on the 645 dated protocols. Expected value = launch value × odds. Farm scenario: plan size 0.02% of TVL capped at $25,000, a 10% farmer drop share, a 12-week horizon, gas of about $35, and a 2%-a-year capital charge; the expected drop is the expected value × drop share × the farm’s share of counted dollar-days (capital × hold days over TVL × days listed). Spearman is the rank correlation between predicted and actual market cap; log R² is the R² of log10(predicted) against log10(actual); MAPE is the median absolute percentage error; the typical miss is the median of max(pred/actual, actual/pred); the Brier score is the mean squared error of the predicted tokened share. The ledger: 198 ranked + 119 priced comps + 297 tokened with no usable cap + 144 out by the launch rule = 758.' }));
+    method.appendChild(el('p', { html: '<b>Method, in full.</b> Comparables: the 119 tokened, non-exchange protocols with a market cap and a CoinGecko id. Launch value: least squares of log10(market cap) on log10(TVL) — intercept <b>' + DATA.power_law.intercept + '</b>, slope <b>' + DATA.power_law.slope + '</b> — plus each category’s median residual, shrunk toward zero with k = 20 and clamped to ±0.3 dex; fitted on the whole set for the board, and refitted on each training half for the tests. Token odds: the no-token clock, π = <b>' + DATA.odds_clock.pi + '</b> never launch, daily hazard <b>' + DATA.odds_clock.hazard_early_per_day + '</b> for the first <b>' + DATA.odds_clock.changepoint_days + '</b> days and <b>' + DATA.odds_clock.hazard_late_per_day + '</b> after that, fitted by grid search on the 645 dated protocols. Expected value = launch value × odds. Farm scenario: plan size 0.02% of TVL capped at $25,000, a 10% farmer drop share, a 12-week horizon, gas of about $35, and a 2%-a-year capital charge; the expected drop is the expected value × drop share × the farm’s share of counted dollar-days (capital × hold days over TVL × days listed). Spearman is the rank correlation between predicted and actual market cap; log R² is the R² of log10(predicted) against log10(actual); MAPE is the median absolute percentage error; the typical miss is the median of max(pred/actual, actual/pred); the Brier score is the mean squared error of the predicted tokened share. The ledger: 198 ranked + 119 priced comps + 297 tokened with no usable cap + 144 out by the launch rule = 758.' }));
     shell.appendChild(method);
   }
 
@@ -598,7 +605,7 @@
     body.appendChild(el('div', { class: 'math', text:
       'launch = 10^(' + DATA.power_law.intercept + ' + ' + DATA.power_law.slope + ' × log10(' + fmtMoney(row.tvl_usd) + ') + ' + row.category_offset_dex.toFixed(2) + ' offset)\n' +
       '       = ' + fmtMoney(base) + '\n' +
-      'odds   = ' + row.token_odds.toFixed(2) + ' (no-token clock: π = ' + DATA.odds_clock.pi + ' never launch, hazard ' + DATA.odds_clock.hazard_per_day + '/day, ' + fmtAge(row.age_days) + ' with no token)\n' +
+      'odds   = ' + row.token_odds.toFixed(2) + ' (no-token clock: π = ' + DATA.odds_clock.pi + ' never launch, hazard ' + DATA.odds_clock.hazard_early_per_day + '/day for the first ' + DATA.odds_clock.changepoint_days + ' days then ' + DATA.odds_clock.hazard_late_per_day + '/day, ' + fmtAge(row.age_days) + ' with no token)\n' +
       'implied = ' + fmtMoney(base) + ' × ' + row.token_odds.toFixed(2) + ' = ' + fmtMoney(row.implied_value_usd) + '\n' +
       'P25–P75 = ' + fmtMoney(row.implied_low_usd) + ' – ' + fmtMoney(row.implied_high_usd) + ' (held-out log-errors, ×' + DATA.validation.range_honesty.p25_factor + '–×' + DATA.validation.range_honesty.p75_factor + ')\n' +
       '90% range = ' + fmtMoney(Math.max(1, Math.round(row.implied_value_usd * DATA.validation.ci_low_factor))) + ' – ' + fmtMoney(Math.round(row.implied_value_usd * DATA.validation.ci_high_factor)) + ' (×' + DATA.validation.ci_low_factor + '–×' + DATA.validation.ci_high_factor + ')' }));

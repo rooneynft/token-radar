@@ -19,12 +19,24 @@
 //     the tests that dropped them instead of hiding them.
 //   * Expected value = launch value x token odds. The odds are a no-token
 //     clock fitted on the snapshot's own listing record: a share pi of
-//     protocols never launch, the rest launch with a constant hazard h per
-//     day. A protocol that has run 90 days with no token still has odds
-//     ~0.84 of ever launching; at 2,000 days it is ~0.23. The clock is
-//     validated on the peers too (Brier score against the base rate,
-//     walk-forward and five-fold), and the board never says a token will
-//     launch — the odds are the peers' record, not a forecast.
+//     protocols never launch, and the rest launch with a two-phase hazard —
+//     fast in the first 90 days, then five times slower. Round 6's constant
+//     hazard under-predicted the youngest bucket (10% predicted vs 26%
+//     actual under six months); the two-phase clock beats it on both blind
+//     tests (walk-forward Brier 0.238 vs 0.242 at the same 64.4% accuracy,
+//     five-fold 0.224 vs 0.225) and cuts the worst calibration gap nearly
+//     in half (0.09 vs 0.16; youngest bucket 22% vs 26% now). pi is floored
+//     at 0.08: the snapshot barely identifies it (full loglik within 1.5
+//     across pi 0–0.14), and at pi = 0 the ever-launch odds are identically
+//     1 — the board would price launch value with no discount at all. 0.08
+//     is the smallest grid step at which the floored clock keeps the
+//     constant clock's walk-forward accuracy. A protocol that has run 90
+//     days with no token still has odds ~0.89 of ever launching; at 3 years
+//     it is ~0.78, at 2,000 days ~0.64 — surviving the fast early window
+//     says less about an old protocol than the constant hazard claimed.
+//     The clock is validated on the peers too (Brier score against the base
+//     rate, walk-forward and five-fold), and the board never says a token
+//     will launch — the odds are the peers' record, not a forecast.
 //   * The range on every row is the interquartile range (P25-P75) of the
 //     held-out log-errors: stated 50%, and the dashboard checks how often
 //     real caps actually fall inside it. The wider 90% range stays in the
@@ -99,7 +111,7 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-6-expected-value';
+export const MODEL_VERSION = 'radar-7-two-phase-clock';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -260,11 +272,15 @@ export interface OddsCalibrationBin {
 export interface OddsValidation {
   /** The clock fitted on the whole dated record: the board's clock. */
   pi: number;
-  hazard_per_day: number;
+  hazard_early_per_day: number;
+  hazard_late_per_day: number;
+  changepoint_days: number;
   /** Walk-forward: fitted on protocols listed before the median date, tested after it. */
-  walk_forward: { train_n: number; test_n: number; pi: number; hazard_per_day: number; brier: number; base_brier: number; accuracy_pct: number; base_accuracy_pct: number };
+  walk_forward: { train_n: number; test_n: number; pi: number; hazard_early_per_day: number; hazard_late_per_day: number; changepoint_days: number; brier: number; base_brier: number; accuracy_pct: number; base_accuracy_pct: number };
   /** Five-fold over the dated peers, by slug order. */
   five_fold: { brier: number; base_brier: number; accuracy_pct: number; base_accuracy_pct: number };
+  /** The round-6 constant-hazard clock on the same two blind tests, so the dashboard can show what the two-phase clock replaced. */
+  constant_clock: { walk_forward_brier: number; five_fold_brier: number };
   calibration: OddsCalibrationBin[];
 }
 
@@ -342,7 +358,7 @@ export interface RadarData {
   /** The power law fitted on the comparables: log10(mcap) = intercept + slope x log10(TVL). */
   power_law: { intercept: number; slope: number };
   /** The no-token clock fitted on the dated record. */
-  odds_clock: { pi: number; hazard_per_day: number };
+  odds_clock: { pi: number; hazard_early_per_day: number; hazard_late_per_day: number; changepoint_days: number };
   comps: CategoryComp[];
   rows: RadarRow[];
   live: LiveRow[];
@@ -492,27 +508,80 @@ export function launchValue(protocol: SnapshotProtocol, fit: PowerLawFit): { lau
 // The no-token clock
 // ---------------------------------------------------------------------------
 
-/** The clock's parameters: the share of protocols that never launch, and the daily hazard for the rest. */
+/** The clock's parameters: the share of protocols that never launch, and the daily hazard
+ * for the rest — fast for the first `changepoint_days` days, slower after them. */
 export interface OddsClock {
+  pi: number;
+  hazard_early_per_day: number;
+  hazard_late_per_day: number;
+  changepoint_days: number;
+  loglik: number;
+}
+
+/** The changepoint: tokens arrive fast in the first 90 days, then the hazard drops.
+ * Fixed at 90 by the blind-test study (it beat 180 and 365 on walk-forward Brier and on
+ * fresh slug-parity and time-tercile splits); the hazards and pi are fitted by grid search. */
+const CHANGEPOINT_DAYS = 90;
+
+/** The floor on pi: the never-launch share. The snapshot barely identifies pi (the full
+ * loglik moves less than 1.5 across pi 0–0.14), and at pi = 0 the ever-launch odds are
+ * identically 1, so the board would price launch value with no discount at all. 0.08 is
+ * the smallest grid step at which the floored clock keeps the constant clock's
+ * walk-forward accuracy while beating it on Brier; the fit then picks pi = 0.08. */
+const PI_MIN = 0.08;
+
+/** The hazard grids the clock is fitted over: coarse, deterministic, and fast. */
+const HAZARDS_EARLY = [0.002, 0.0025, 0.003, 0.004, 0.005, 0.006, 0.008];
+const HAZARDS_LATE = [0.0004, 0.0006, 0.0008, 0.001, 0.0015];
+
+/** The share of eventual launchers still tokenless at `age` days, under the clock. */
+export function survival(age: number, clock: OddsClock): number {
+  return Math.exp(
+    -clock.hazard_early_per_day * Math.min(age, clock.changepoint_days) -
+      clock.hazard_late_per_day * Math.max(0, age - clock.changepoint_days),
+  );
+}
+
+/**
+ * Fit the clock on dated protocols: a protocol either never launches (share pi) or
+ * launches with a two-phase daily hazard — h1 for the first 90 days, h2 after.
+ * A tokened protocol of age A contributes log((1-pi)(1-S(A))); a pre-token one
+ * contributes log(pi + (1-pi)S(A)), where S is the two-phase survival above.
+ * The fit is a grid search, so it is deterministic and refits identically every run.
+ */
+export function fitOddsClock(dated: { age_days: number; tokened: boolean }[]): OddsClock {
+  let best: OddsClock = { pi: PI_MIN, hazard_early_per_day: 0.004, hazard_late_per_day: 0.0008, changepoint_days: CHANGEPOINT_DAYS, loglik: -Infinity };
+  for (let pi100 = Math.round(PI_MIN * 100); pi100 <= 90; pi100 += 2) {
+    const pi = pi100 / 100;
+    for (const h1 of HAZARDS_EARLY) {
+      for (const h2 of HAZARDS_LATE) {
+        let ll = 0;
+        for (const d of dated) {
+          const s = survival(d.age_days, { pi, hazard_early_per_day: h1, hazard_late_per_day: h2, changepoint_days: CHANGEPOINT_DAYS, loglik: 0 });
+          const p = d.tokened ? (1 - pi) * (1 - s) : pi + (1 - pi) * s;
+          ll += Math.log(Math.max(p, 1e-12));
+        }
+        if (ll > best.loglik) best = { pi, hazard_early_per_day: h1, hazard_late_per_day: h2, changepoint_days: CHANGEPOINT_DAYS, loglik: ll };
+      }
+    }
+  }
+  return best;
+}
+
+/** The constant-hazard clock round 6 used, kept only as the baseline the two-phase
+ * clock is tested against: same likelihood, one hazard for every age. */
+export interface ConstantClock {
   pi: number;
   hazard_per_day: number;
   loglik: number;
 }
 
-/** The hazard grid the clock is fitted over: coarse, deterministic, and fast. */
-const HAZARDS = [0.0002, 0.0004, 0.0006, 0.0008, 0.001, 0.0015, 0.002, 0.003, 0.005];
-
-/**
- * Fit the clock on dated protocols: a protocol either never launches (share pi) or
- * launches with a constant daily hazard h. A tokened protocol of age A contributes
- * log((1-pi)(1-exp(-hA))); a pre-token one contributes log(pi + (1-pi)exp(-hA)).
- * The fit is a grid search, so it is deterministic and refits identically every run.
- */
-export function fitOddsClock(dated: { age_days: number; tokened: boolean }[]): OddsClock {
-  let best: OddsClock = { pi: 0, hazard_per_day: 0.001, loglik: -Infinity };
+/** The constant clock's fit, on the same grid round 6 used. */
+export function fitConstantClock(dated: { age_days: number; tokened: boolean }[]): ConstantClock {
+  let best: ConstantClock = { pi: 0, hazard_per_day: 0.001, loglik: -Infinity };
   for (let pi100 = 0; pi100 <= 90; pi100 += 2) {
     const pi = pi100 / 100;
-    for (const h of HAZARDS) {
+    for (const h of [0.0002, 0.0004, 0.0006, 0.0008, 0.001, 0.0015, 0.002, 0.003, 0.005]) {
       let ll = 0;
       for (const d of dated) {
         const s = Math.exp(-h * d.age_days);
@@ -525,20 +594,27 @@ export function fitOddsClock(dated: { age_days: number; tokened: boolean }[]): O
   return best;
 }
 
+/** The share of protocols of this age that record a token, under the constant clock. */
+export function pTokenedConstant(age: number, clock: ConstantClock): number {
+  return (1 - clock.pi) * (1 - Math.exp(-clock.hazard_per_day * age));
+}
+
 /** The share of protocols of this age that record a token, under the clock. */
 export function pTokened(age: number, clock: OddsClock): number {
-  return (1 - clock.pi) * (1 - Math.exp(-clock.hazard_per_day * age));
+  return (1 - clock.pi) * (1 - survival(age, clock));
 }
 
 /**
  * The odds a protocol ever launches, given it has run `age` days with no token:
  * the launchers who survived this long, over all survivors. It falls with age:
  * a protocol that was going to launch usually already has, so an old survivor
- * is enriched for never-launchers. Unknown age reads as a year.
+ * is enriched for never-launchers — and, under the two-phase hazard, a survivor
+ * past the fast first 90 days has already cleared the dangerous window, so its
+ * odds then fall only at the slow late hazard. Unknown age reads as a year.
  */
 export function oddsEver(age: number | null, clock: OddsClock): number {
   const a = age ?? 365;
-  const s = Math.exp(-clock.hazard_per_day * a);
+  const s = survival(a, clock);
   return ((1 - clock.pi) * s) / (clock.pi + (1 - clock.pi) * s);
 }
 
@@ -889,7 +965,9 @@ function validateOdds(snapshot: Snapshot): OddsValidation {
     train_n: trainW.length,
     test_n: testW.length,
     pi: round4(clockW.pi),
-    hazard_per_day: clockW.hazard_per_day,
+    hazard_early_per_day: clockW.hazard_early_per_day,
+    hazard_late_per_day: clockW.hazard_late_per_day,
+    changepoint_days: clockW.changepoint_days,
     brier: round4(brierScore(predW, actualW)),
     base_brier: round4(brierScore(actualW.map(() => baseW), actualW)),
     accuracy_pct: round4(accuracyPct(predW, actualW)),
@@ -919,6 +997,20 @@ function validateOdds(snapshot: Snapshot): OddsValidation {
     accuracy_pct: round4(accuracyPct(pred5, actual5)),
     base_accuracy_pct: round4(accuracyPct(actual5.map(() => base5), actual5)),
   };
+  // The constant-hazard clock on the same two blind tests: the baseline the two-phase
+  // clock must beat. Same splits, same refits — only the hazard family differs.
+  const constW = fitConstantClock(trainW);
+  const predWc = testW.map((d) => pTokenedConstant(d.age_days, constW));
+  const pred5c: number[] = [];
+  for (let f = 0; f < 5; f++) {
+    const train = folds.flatMap((fold, g) => (g === f ? [] : fold));
+    const clock = fitConstantClock(train);
+    for (const d of folds[f]!) pred5c.push(pTokenedConstant(d.age_days, clock));
+  }
+  const constant_clock = {
+    walk_forward_brier: round4(brierScore(predWc, actualW)),
+    five_fold_brier: round4(brierScore(pred5c, actual5)),
+  };
   // Calibration: predicted share tokened vs actual, by no-token age bucket, full clock.
   const buckets: { label: string; test: (age: number) => boolean }[] = [
     { label: 'under 6 months', test: (a) => a < 180 },
@@ -933,7 +1025,7 @@ function validateOdds(snapshot: Snapshot): OddsValidation {
     const actual = members.length === 0 ? 0 : members.filter((d) => d.tokened).length / members.length;
     return { bucket: b.label, n: members.length, predicted_share: round4(predicted), actual_share: round4(actual) };
   });
-  return { pi: round4(full.pi), hazard_per_day: full.hazard_per_day, walk_forward, five_fold, calibration };
+  return { pi: round4(full.pi), hazard_early_per_day: full.hazard_early_per_day, hazard_late_per_day: full.hazard_late_per_day, changepoint_days: full.changepoint_days, walk_forward, five_fold, constant_clock, calibration };
 }
 
 /** The whole validation report, computed from the snapshot alone. */
@@ -1367,7 +1459,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     total_launch_usd: board.reduce((n, r) => n + r.launch_value_usd, 0),
     global_median_ratio: fit.global_median,
     power_law: { intercept: fit.intercept, slope: fit.slope },
-    odds_clock: { pi: round4(clock.pi), hazard_per_day: clock.hazard_per_day },
+    odds_clock: { pi: round4(clock.pi), hazard_early_per_day: clock.hazard_early_per_day, hazard_late_per_day: clock.hazard_late_per_day, changepoint_days: clock.changepoint_days },
     comps: compsList,
     rows: board.map(radarRow),
     live,
