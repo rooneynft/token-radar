@@ -1,11 +1,12 @@
-// Token Radar: a comps-calibrated token-launch radar, round 4 (Node 22, standard library only).
+// Token Radar: an expected-value token-launch radar, round 4 rebuilt as model v6 (Node 22, standard library only).
 //
 // The run: read the sealed snapshot from /input/snapshot.json (or --input <file|dir>), score
-// every pre-token protocol with the model in lib/model.ts, validate that model on the
-// snapshot's own tokened protocols (held-out + walk-forward, with a calibration table and a
-// 90% range per row), write the ranked board to /output/board.json, copy this repository's
-// dashboard/ and screenshots/ to /output, and last write /output/dossier.json, the summary
-// the judge reads, with the vendored make.fun library.
+// every pre-token protocol that passes the house launch rule with the model in lib/model.ts
+// (launch value off a fitted power law, times token odds off a fitted no-token clock),
+// validate that model on the snapshot's own tokened protocols (held-out + walk-forward
+// term tests, odds Brier scores, and a checked P25-P75 range), write the ranked board to
+// /output/board.json, copy this repository's dashboard/ and screenshots/ to /output, and
+// last write /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
 //
 // The dashboard is a static page, no framework and no network: dashboard/index.html,
 // dashboard/app.css and dashboard/app.js read /output/data.js, which this program writes
@@ -100,8 +101,8 @@ function writeOutputs(out: string, board: ReturnType<typeof buildRadar>['board']
 function summarize(snapshot: ReturnType<typeof parseSnapshot>, board: ReturnType<typeof buildRadar>['board'], radar: ReturnType<typeof buildRadar>['radar'], out: string, shots: number): string {
   const v = radar.validation;
   return (
-    `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
-    `token radar: validation held-out Spearman ${v.held_out.spearman} (flat ${v.held_out.flat_spearman}), walk-forward ${v.walk_forward.spearman}, 90% range x${v.ci_low_factor}–x${v.ci_high_factor}\n` +
+    `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.off_list_size} off-list, ${radar.live_size} live set aside)\n` +
+    `token radar: launch held-out Spearman ${v.held_out_kept.spearman} (flat ${v.held_out_kept.flat_spearman}), walk-forward miss x${v.walk_forward_kept.medfac} (flat x${v.walk_forward_kept.flat_medfac}), odds Brier ${v.odds.walk_forward.brier} vs base ${v.odds.walk_forward.base_brier}, range P25-P75 x${v.range_honesty.p25_factor}-x${v.range_honesty.p75_factor}\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots} images) and ${join(out, 'dossier.json')}\n`
   );
 }

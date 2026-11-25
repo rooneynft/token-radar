@@ -32,7 +32,26 @@ header.mast h1 span { color: #7dd3c8; }
 header.mast p { margin: 8px 0 0; color: #c3cede; max-width: 860px; }
 header.mast .meta { margin-top: 12px; font-size: 13px; color: #8fa1bd; }
 header.mast .meta b { color: #dbe4f0; font-weight: 600; }
-.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 18px 0 4px; }
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0 4px; }
+.integrity { font-size: 13px; color: var(--good); background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px 14px; margin: 14px 0 4px; }
+.ledger { margin: 14px 0 4px; }
+.ledger-title { font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.ledger-bar { display: flex; height: 14px; border-radius: 99px; overflow: hidden; }
+.ledger-seg { height: 100%; }
+.ledger-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.ledger-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+.ledger-legend b { color: var(--ink); }
+.scenario { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 0 0 12px; font-size: 13px; }
+.scen-label { font-weight: 700; }
+.scen-field select { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+.scen-note { color: var(--muted); }
+td .tag {
+  display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px;
+  background: #e0e7ff; color: #3730a3; margin-left: 6px; vertical-align: 1px;
+}
+td .odds { font: 700 14px var(--mono); }
+.oddsbar { height: 5px; background: #e5e7eb; border-radius: 99px; margin-top: 4px; min-width: 56px; }
+.oddsfill { height: 100%; background: var(--accent); border-radius: 99px; }
 .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
 .kpi .k { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .kpi .v { font: 700 26px/1.2 var(--mono); margin-top: 4px; }

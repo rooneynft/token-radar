@@ -1,88 +1,111 @@
-# Token Radar — round 4
+# Token Radar — the pre-token board, priced and tested
 
-A pre-token radar: protocols that record no token, ranked by what their token would
-be worth if their record stayed as it is — priced off a power law fitted on the
-tokened comparables, and tested held-out and walk-forward before it prices a
-single row.
+A token launch radar: every protocol that records no token and passes the
+launch rule, ranked by expected value — the value if a token launches, times
+the odds one ever does. Snapshot 2026-11-14, 758 protocols, 40 on the
+watchlist, **198 rows ranked** (40 watchlist + 138 early finds below the
+$50M floor + 20 off-list at or above the floor).
 
-## What changed since round 3
+## The model, in one paragraph
 
-Round 3 priced protocols with a ratio model: the category median mcap/TVL, shrunk
-toward the global median. Tested on the snapshot's tokened protocols, that model
-did not beat a flat global median at all — and it ran 10.45× hot in the top
-calibration quintile. This round replaces the ratio with a fitted power law and
-shows the validation that proves it, in the dashboard itself:
+The launch value is a power law fitted on the 119 tokened comparables with a
+known market cap: log10(market cap) = **3.3823 + 0.4721 × log10(TVL)**,
+plus each category's median residual, shrunk toward zero (k = 20, clamped to
+±0.3 dex). Only the category offset survives both blind tests — growth, age,
+chain count, the crash guard and all five together were tested and dropped.
+The token odds come from a no-token clock fitted on the 645 dated protocols:
+a share **π = 0.14 never launches**, the rest launch with a daily hazard of
+**0.0015** — so a survivor's ever-launch odds run 0.84 at 90 days, 0.54 at
+3 years, 0.23 at 2,000 days. Expected value = launch value × odds. Every
+row carries its P25–P75 range (×0.43–×5.11 around the point estimate, stated
+50%, verified: 49% of held-out caps leave-one-out and 50% walk-forward fall
+inside it).
 
-- **Power law.** log10(market cap) = 3.3823 + 0.4721 × log10(TVL), fitted by least
-  squares on the 119 tokened comparables. Market cap scales sublinearly with TVL:
-  a protocol ten times bigger in TVL is worth about three times more, not ten.
-- **Category offsets.** Each category's median residual from the power law, shrunk
-  toward zero (k = 20) and clamped to ±0.3 dex — the sector's judgement, kept in
-  proportion.
-- **The old terms stay.** Growth (1 + clamped 7-day change × 0.5), maturity
-  (0.6–1.0 by age), breadth (+2% per chain, up to four) and the crash guard (×0.9
-  at −25% 7-day or worse) are still there, on top of the power-law base.
-- **A 90% range on every row.** The held-out log-errors give a ×0.14–×23.0 range
-  and a typical miss of ×3.7. Token pricing is noisy; the board shows the range
-  under every value instead of hiding it.
+## How it is tested
 
-## Validation (held-out: even slugs fit, odd slugs predicted; walk-forward: listed
-before the median listing date fit, after it predicted)
+Two blind tests before the model prices a single row, on the same sets the
+flat global median is tested on:
 
-| Test | Spearman | log R² | MAPE | Within 2× | Flat MAPE |
-| --- | --- | --- | --- | --- | --- |
-| Held-out, power-law core | 0.357 | +0.044 | 86.5% | 32.2% | 88.0% |
-| Held-out, full model | 0.392 | +0.056 | 90.6% | 25.4% | 88.0% |
-| Walk-forward, power-law core | 0.375 | +0.054 | 79.3% | 45.5% | 86.5% |
-| Walk-forward, full model | 0.303 | −0.028 | 74.1% | 29.5% | 86.5% |
+| Test | Kept model | Flat median |
+| --- | --- | --- |
+| Held-out (even slugs fit, odd slugs predicted, n=59) | Spearman 0.342, log R² +0.045, MAPE 87.2%, within 2× 32.2%, typical miss ×3.57 | Spearman 0.357, log R² −0.205, MAPE 91.7%, within 2× 27.1%, typical miss ×5.14 |
+| Walk-forward (listed before the median date fit, after it predicted, n=59) | Spearman 0.370, log R² +0.051, MAPE 78.3%, within 2× 45.5%, typical miss ×2.73 | Spearman 0.369, log R² −0.182, MAPE 84.1%, within 2× 27.1%, typical miss ×4.96 |
 
-The flat global median is the baseline on the same test sets: its log R² is
-−0.20 held-out and −0.25 walk-forward — it predicts worse than the mean, and the
-power law beats it on value in every test. The full model wins on held-out rank
-(+3.5pp Spearman vs flat) and on walk-forward value (MAPE 74.1% vs 86.5%), while
-it trails flat on walk-forward rank (−7.2pp) — both numbers are shown in the
-dashboard, not just the flattering one. The dashboard's Validation tab carries
-all four test tables, the model comparison, the calibration quintiles and the
-method in full.
+The kept model wins on value in both tests — log R² +0.05 against the flat
+ratio's −0.2, typical miss ×2.73 against ×4.96 walk-forward — and gives back
+a hair on rank held-out (0.342 vs 0.357): the sector offset buys value at
+the cost of a little rank. The odds, tested as a classifier of which peers
+record a token: Brier **0.242 vs 0.321 base** walk-forward (64.4% called
+right vs 35.6%), 0.225 vs 0.250 five-fold. One honest miss: the clock
+under-predicts the youngest bucket (10% predicted vs 26% actual under six
+months) — tokens arrive faster in the first six months than a constant
+hazard allows, and the dashboard shows that calibration table.
 
-## The board
+Term selection, leave-one-out / walk-forward typical miss — a term is kept
+only if it lowers the miss in both:
 
-226 rows: every pre-token protocol with a listed date and at least $50M of TVL,
-plus 46 early finds below the floor (under $50M). Steakhouse Financial leads at
-$64.4M implied, followed by Gauntlet ($51.5M) and Veda ($40.2M). Total implied
-value across the board: $1.60B — down from $5.46B in round 3, because the power
-law stops crediting giants with ten times the value for ten times the TVL.
+| Term | LOO | Walk-forward | Kept? |
+| --- | --- | --- | --- |
+| Power law alone (core) | ×3.36 | ×2.81 | baseline |
+| + category offset | ×3.35 | ×2.73 | **kept** |
+| + 7-day growth | ×3.46 | ×2.90 | tested, not kept |
+| + maturity / age | ×3.35 | ×3.20 | tested, not kept |
+| + chain count | ×3.44 | ×2.73 | tested, not kept |
+| + crash guard | ×3.36 | ×2.81 | tested, not kept |
+| + all five | ×3.56 | ×2.96 | tested, not kept |
 
-Every row carries a netted 7-step farm plan: the capital tier ($50–$250 by TVL),
-the hold tier (30–60 days by age), a weekly action that keeps the address active,
-and the gas total netted against the implied value, with the verdict. The board
-page re-derives each plan from the row's own record with the same rules as the
-board file, so the page and the board never disagree.
+Growth and age fall to price a token once launched, so the launch value
+leaves them out; age enters through the odds instead, where the listing
+record is what it predicts.
 
-## How to run
+## The farm decision
 
-```sh
-# main.ts writes out/board.json, out/data.js, out/dashboard/ and out/dossier.json
-# (place the competition's snapshot.json at the repo root; the kit's input/snapshot.json)
-cp token-radar-01-kit/input/snapshot.json snapshot.json
-node main.ts token-radar-01-kit/input/snapshot.json
-# The three screenshots: board, a protocol detail, the Lending filter
-NODE_PATH=shots/node_modules node scripts/screenshot.mjs
-node main.ts token-radar-01-kit/input/snapshot.json
+Each row gets a netted farm plan: plan size 0.02% of TVL capped at $25,000,
+a 10% farmer drop share, a 12-week horizon, gas of about $35, and a 2%-a-year
+capital charge. The expected drop is the expected value × drop share × the
+farm's share of counted dollar-days (capital × hold days over TVL × days
+listed). Verdict: **Farm** if net/hour beats $25, **Marginal** if net is
+positive, else **Skip**. Under the default scenario: **13 Farm, 32 Marginal,
+153 Skip** of 198. The top rows by value are Skip at retail size — the
+capital charge dominates on giants — while the Farm rows are small young
+protocols. The dashboard has sliders (plan size, drop share, horizon) that
+recompute every verdict and plan live; `board.json` carries the default
+scenario's steps.
+
+## The ledger
+
+All 758 snapshot protocols sit in exactly one group: ranked watchlist 40,
+ranked early 138, ranked off-list 20, token trades priced comp 119, token
+recorded no usable cap 297, out — exchange 42, out — liquid staking 43,
+out — bridge 43, out — versioned or wrapped 16. The dashboard recomputes
+the board from `board.json` at render time and checks it: 198 of 198 rows,
+ranks 1–198 in order, values never rising, totals equal ($1.55B expected
+value), watchlist 40 of 40, ledger 758 of 758.
+
+## Top of the board
+
+1. Sentora Curator — $58.1M expected ($75.6M if it launches, odds 77%), Skip at retail size (net −$139, −$50.61/h)
+2. Steakhouse Financial — $55.2M, Skip
+3. Gauntlet — $42.5M, Skip
+4. Veda — $32.9M, Skip
+5. USDD — $30.3M, Skip
+
+## Run it
+
+```
+MAKEFUN_OUTPUT_DIR=out node main.ts --input ./snapshot.json
 ```
 
-Requires Node.js 22.18+ and a Chromium for the screenshots (Playwright-managed,
-or `CHROME_PATH`). The dashboard is a static page: it reads `data.js`, renders
-locally, and makes no network requests. The kit check is:
+Node 22, standard library only, no network. Reads `/input/snapshot.json`
+(or the `--input` path), writes `board.json`, `data.js`, `dashboard/`,
+`screenshots/` and `dossier.json` into the output directory. The program
+runs twice and writes identical bytes. Screenshots:
+`node scripts/screenshot.mjs` (Playwright + Chromium), then re-run `main.ts`
+so `out/` picks them up.
 
-```sh
-node token-radar-01-kit/cli/makefun.mjs check --repo . --system-prompt ../SYSTEM_PROMPT.md
-```
+## What this does not claim
 
-## Reproducibility
-
-The snapshot is the competition's `input/snapshot.json` (as of 2026-11-14, 758
-protocols). Nothing in the model is tuned to a single protocol: the power law,
-the category offsets and the validation are all computed from the snapshot at
-run time, and the numbers above are what that run produces. Rerun `main.ts` and
-you get the same board.
+Token pricing is noisy — a protocol's market cap can sit an order of
+magnitude from what its TVL suggests, and the typical miss is ×3.6
+held-out. The board shows its error bars on every row instead of pretending
+its values are precise. The implied value is this entry's own claim.
